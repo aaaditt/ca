@@ -3,7 +3,6 @@ msg1:   .asciiz "Enter a number: "
 msg2:   .asciiz "The factorial is: "
 
     .text
-    .globl main
 main:
     li $v0, 4           # print string
     la $a0, msg1
@@ -33,5 +32,3 @@ over:
 
     li $v0, 10          # exit
     syscall
-
-.end main

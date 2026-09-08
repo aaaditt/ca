@@ -5,7 +5,6 @@ no:     .word 0
 sum:    .word 0
 
     .text
-    .globl main
 main:
     li $v0, 4           # print string
     la $a0, msg1
@@ -38,5 +37,3 @@ over:
 
     li $v0, 10          # exit
     syscall
-
-.end main

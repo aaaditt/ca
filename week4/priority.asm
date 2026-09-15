@@ -50,6 +50,20 @@ main:   li $v0,4
         
         mult $t0,$t1
         mflo $t5
-        mfhi $t6
-        div 
+        div $t5,$t2
+        mflo $t6
+        div $t6,$t2
+        mfhi $t7
+        add $t8,$t7,$t4
+
+        li $v0,4
+        la $a0,res
+        syscall
+
+        li $v0,1
+        move $a0,$t8
+        syscall
+
+        li $v0,10
+        syscall
 

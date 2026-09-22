@@ -16,8 +16,7 @@ main: 	la $t1, array1
 loop:	beq $t4, $t5, end
 	lw $t6, 0($t1)
 	lw $t7, 0($t2)
-	li $t0, 0            #sum counter 
-	add $t0, $t6, $t7
+	add $t0, $t6, $t7    #sum = array1[i] + array2[i]
 	sw $t0, 0($t3)
 	addi $t1, $t1, 4
 	addi $t2, $t2, 4

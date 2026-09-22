@@ -1,11 +1,11 @@
-	.data
-num: .asciiz “Enter number to be found: ”
-found: .asciiz “The number is found at ”
-not_found: .asciiz “The number is not found.”
-array: .word 9, 10, 11, 12, 13, 14, 15, 16, 17, 18
+    .data
+num:        .asciiz “Enter number to be found: ”
+found:      .asciiz “The number is found at ”
+not_found:  .asciiz “The number is not found.”
+array:      .word 9, 10, 11, 12, 13, 14, 15, 16, 17, 18
 
 	.text
-main: 	li $v0,4
+main:   li $v0,4
 	la $a0,num
 	syscall
 

@@ -1,7 +1,8 @@
     .data
+array:  .space 20   #or can write this as array:    .word   0,0,0,0,0 or .word 0:5
 msg:    .asciiz "Enter 5 elements: "
 sum:    .asciiz "the sum of the array is: "
-array:  .space 20   #or can write this as array:    .word   0,0,0,0,0 or .word 0:5
+
     .text
 
 main:   li $v0,4

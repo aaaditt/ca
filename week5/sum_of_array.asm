@@ -1,6 +1,6 @@
 	.data
-array1: .word 11, 13, 15, 17, 19
-array2: .word 1, 3, 5, 7, 9
+array1: .word 11, 13, 15, 85, 86
+array2: .word 1, 3, 5, 85, 86
 array3: .word 0, 0, 0, 0, 0
 result: .asciiz "The resultant array is: "
 space: .asciiz " "

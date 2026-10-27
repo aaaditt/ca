@@ -490,21 +490,27 @@ fib_end:        lw $s1, 0($sp)         # restore the caller's $s1
 
 Expected output for `n = 10`: `The nth Fibonacci term is: 55`.
 
-**Pattern:** "save, recurse, restore." The procedure is a direct translation
-of the definition `fib(0) = 0`, `fib(1) = 1`,
-`fib(n) = fib(n - 1) + fib(n - 2)`, so it calls itself twice. Because of
-that, three values must survive a call and are pushed on the stack at the
-start of every call and popped at the end:
+### What the program does, in one line
 
-| Saved | Why it has to be saved                                              |
-|-------|---------------------------------------------------------------------|
-| `$ra` | the `jal fib` inside `fib` overwrites it with a new return address  |
-| `$s0` | holds `n`, still needed after the first call to compute `n - 2`     |
-| `$s1` | holds `fib(n - 1)`, still needed after the second call for the `add` |
+`main` reads `n`, calls `fib` with `n`, and prints what comes back. `fib`
+works out `fib(n)` by **calling itself** for `fib(n - 1)` and `fib(n - 2)`
+and adding the two answers.
 
-Each call gets its own 12 bytes of stack (its "stack frame"), so every level
-of the recursion has its own private copy of `n`, `fib(n - 1)` and its return
-address.
+### The idea of recursion, without any assembly
+
+The definition is:
+
+```
+fib(0) = 0
+fib(1) = 1
+fib(n) = fib(n - 1) + fib(n - 2)      for n >= 2
+```
+
+To find `fib(4)`, the procedure does not know the answer, so it asks two
+smaller questions: `fib(3)` and `fib(2)`. Each of those asks two even smaller
+questions, and so on, until a question is small enough to answer straight
+away — `fib(1)` or `fib(0)`. These are the **base cases**; they stop the
+recursion. The answers are then added up on the way back.
 
 Calls made for `n = 4` (each line returns the value on the right):
 
@@ -520,31 +526,226 @@ fib(4)                          = 3
     └── fib(0)                  = 0   (base case)
 ```
 
+### The agreement between `main` and `fib`
+
+| Register | Direction       | Meaning   |
+|----------|-----------------|-----------|
+| `$a0`    | caller → `fib`  | `n`       |
+| `$v0`    | `fib` → caller  | `fib(n)`  |
+
+The "caller" is `main` for the first call, and `fib` itself for every other
+call. `fib` calls itself using exactly the same agreement: put the smaller
+`n` in `$a0`, `jal fib`, and read the answer from `$v0`.
+
+### Why this program needs the stack (and the Week 8 programs before it did not)
+
+In `arithmetic.asm` and `linear_search.asm` the procedures never call
+another procedure, so nothing they need is ever overwritten. `fib` is
+different: **every call to `fib` uses the same registers**. When `fib(4)`
+calls `fib(3)`, the inner call will:
+
+- overwrite `$ra` (its own `jal fib` puts a new return address there), so
+  `fib(4)` would forget the way back to `main`;
+- overwrite `$s0` with its own `n` (3), so `fib(4)` would forget that its `n`
+  was 4 and could not work out `n - 2`;
+- overwrite `$s1` with its own partial answer, so `fib(4)` would lose
+  `fib(3)` while it is waiting for `fib(2)`.
+
+The fix is: at the start of each call, **save** these three registers in
+memory, and just before returning, **load them back**. The place in memory
+used for this is the **stack**.
+
+### The stack in 4 points
+
+- `$sp` (stack pointer) holds the address of the top of the stack.
+- The stack grows **downwards** in memory: to make room, *subtract* from
+  `$sp`; to give the room back, *add* to `$sp`.
+- Each call to `fib` takes 12 bytes (3 words) — its **stack frame**:
+
+  ```
+            higher addresses
+          ┌───────────────────┐
+  8($sp)  │  saved $ra        │
+          ├───────────────────┤
+  4($sp)  │  saved $s0        │
+          ├───────────────────┤
+  0($sp)  │  saved $s1        │   <- $sp points here after addi $sp, $sp, -12
+          └───────────────────┘
+            lower addresses
+  ```
+
+- When `fib` calls itself, the inner call puts its own 12-byte frame *below*
+  the current one. So if the recursion is 4 calls deep, there are 4 frames
+  stacked one under the other, each holding the values of a different call.
+
+### Step 1 — `main` makes the first call
+
+```asm
+                li $v0, 5
+                syscall                # read integer -> $v0
+                move $a0, $v0          # $a0 = n
+
+                jal fib                # $v0 = fib(n)
+                move $t0, $v0          # save the result before printing
+```
+
+Same as the other two programs: argument in `$a0`, `jal` saves the return
+address in `$ra` and jumps, and the answer comes back in `$v0`. It is copied
+into `$t0` straight away because the print syscall reuses `$v0`.
+
+### Step 2 — push: save `$ra`, `$s0`, `$s1`
+
+```asm
+fib:            addi $sp, $sp, -12     # push: make space for 3 words
+                sw $ra, 8($sp)         # save the return address
+                sw $s0, 4($sp)         # save the caller's $s0
+                sw $s1, 0($sp)         # save the caller's $s1
+```
+
+This is done **first**, before `fib` changes anything. The frame now holds
+the caller's values: where to return to, and the caller's `$s0` / `$s1`.
+After this, `fib` is free to use `$ra`, `$s0` and `$s1` however it likes.
+
+### Step 3 — base case check
+
+```asm
+                move $s0, $a0          # $s0 = n
+                li $t0, 1
+                ble $s0, $t0, base     # n <= 1 -> base case
+```
+
+- `n` is copied from `$a0` into `$s0` because `$a0` will be overwritten by
+  the next call's argument, but `n` is still needed after that call.
+- If `n <= 1` there is nothing to recurse on, so jump to `base`.
+
+### Step 4 — first recursive call: `fib(n - 1)`
+
+```asm
+                addi $a0, $s0, -1      # argument = n - 1
+                jal fib                # $v0 = fib(n - 1)
+                move $s1, $v0          # $s1 = fib(n - 1)
+```
+
+The answer is moved into `$s1` straight away, because the second call will
+put its own answer in `$v0` and overwrite this one. `$s1` is safe: the inner
+calls save and restore it (Step 2 and Step 7).
+
+### Step 5 — second recursive call: `fib(n - 2)`, then add
+
+```asm
+                addi $a0, $s0, -2      # argument = n - 2
+                jal fib                # $v0 = fib(n - 2)
+                add $v0, $s1, $v0      # $v0 = fib(n - 1) + fib(n - 2)
+
+                j fib_end              # must skip past base
+```
+
+- `$s0` still holds this call's `n`, even though a whole recursive call has
+  run in between — that call saved `$s0` at its start and restored it at its
+  end.
+- After the `add`, `$v0` holds `fib(n)`, which is the return value.
+- `j fib_end` skips over `base`; without it, `move $v0, $s0` would replace
+  the answer with `n`.
+
+### Step 6 — base case
+
+```asm
+base:           move $v0, $s0          # fib(0) = 0, fib(1) = 1 -> return n itself
+```
+
+For `n = 0` the answer is 0 and for `n = 1` the answer is 1 — in both cases
+the answer is `n` itself, so one `move` covers both.
+
+### Step 7 — pop: restore and return
+
+```asm
+fib_end:        lw $s1, 0($sp)         # restore the caller's $s1
+                lw $s0, 4($sp)         # restore the caller's $s0
+                lw $ra, 8($sp)         # restore the return address
+                addi $sp, $sp, 12      # pop: give the 3 words back
+                jr $ra
+```
+
+- The three registers are loaded back from the same offsets they were saved
+  at, so the caller gets its `$s0` / `$s1` back unchanged and `$ra` again
+  points back into the caller.
+- `addi $sp, $sp, 12` undoes the `-12` from Step 2, so `$sp` is exactly where
+  it was before the call.
+- `$v0` is **not** restored — it is the return value, and it is the only
+  thing that is supposed to change.
+- Both the base case and the recursive case end here, so the stack is popped
+  on every path out of `fib`. A procedure that pushes must always pop the same
+  amount before `jr $ra`.
+
+### Full trace for `n = 3`
+
+`fib(3) = fib(2) + fib(1) = (fib(1) + fib(0)) + fib(1) = (1 + 0) + 1 = 2`.
+This takes 5 calls. Read the table top to bottom; it is the exact order the
+CPU runs things in. "Frame" is the 12 bytes saved by that call.
+
+| # | Running   | What happens                                                                   | `$s0` | `$s1` | `$v0` |
+|---|-----------|--------------------------------------------------------------------------------|-------|-------|-------|
+| 1 | `main`    | `$a0 = 3`, `jal fib` → `$ra` = back to `main`                                   | –     | –     | –     |
+| 2 | `fib(3)`  | push frame A (saves `$ra` → `main`); `$s0 = 3`; 3 > 1, so call `fib(2)`         | 3     | –     | –     |
+| 3 | `fib(2)`  | push frame B (saves `$ra` → `fib(3)`, saves `$s0 = 3`); `$s0 = 2`; call `fib(1)` | 2     | –     | –     |
+| 4 | `fib(1)`  | push frame C (saves `$s0 = 2`); `$s0 = 1`; base case → `$v0 = 1`                | 1     | –     | 1     |
+| 5 | `fib(1)`  | pop frame C: `$s0` back to 2, `$ra` → `fib(2)`; `jr $ra`                        | 2     | –     | 1     |
+| 6 | `fib(2)`  | `$s1 = fib(1) = 1`; `$a0 = 2 - 2 = 0`; call `fib(0)`                            | 2     | 1     | 1     |
+| 7 | `fib(0)`  | push frame D (saves `$s0 = 2`, `$s1 = 1`); `$s0 = 0`; base case → `$v0 = 0`     | 0     | 1     | 0     |
+| 8 | `fib(0)`  | pop frame D: `$s0` back to 2, `$s1` back to 1; `jr $ra`                         | 2     | 1     | 0     |
+| 9 | `fib(2)`  | `$v0 = $s1 + $v0 = 1 + 0 = 1`                                                   | 2     | 1     | 1     |
+| 10 | `fib(2)` | pop frame B: `$s0` back to **3**, `$ra` → `fib(3)`; `jr $ra`                    | 3     | –     | 1     |
+| 11 | `fib(3)` | `$s1 = fib(2) = 1`; `$a0 = 3 - 2 = 1`; call `fib(1)`                            | 3     | 1     | 1     |
+| 12 | `fib(1)` | push frame E (saves `$s0 = 3`, `$s1 = 1`); `$s0 = 1`; base case → `$v0 = 1`     | 1     | 1     | 1     |
+| 13 | `fib(1)` | pop frame E: `$s0` back to 3, `$s1` back to 1; `jr $ra`                         | 3     | 1     | 1     |
+| 14 | `fib(3)` | `$v0 = $s1 + $v0 = 1 + 1 = 2`                                                   | 3     | 1     | 2     |
+| 15 | `fib(3)` | pop frame A: `$ra` → `main`; `jr $ra`                                           | –     | –     | 2     |
+| 16 | `main`   | `$t0 = 2`, prints `The nth Fibonacci term is: 2`                                | –     | –     | 2     |
+
+The rows to look at are 10 and 11. `fib(3)` set `$s0 = 3` back in row 2, then
+`fib(2)` and its inner calls changed `$s0` to 2, 1, 2, 0, 2. Yet in row 11,
+`fib(3)` computes `n - 2` from `$s0` and gets the right `n` (3). That only
+works because every call put the caller's `$s0` back before returning (row
+10). The same goes for `$ra`: each `jr $ra` lands in the right place because
+`$ra` was loaded back from that call's own frame.
+
+The stack at its deepest point (row 4), with three frames on it:
+
+```
+          ┌──────────────────────────────┐
+          │ frame A  (fib(3))            │   saved $ra -> main
+          ├──────────────────────────────┤
+          │ frame B  (fib(2))            │   saved $ra -> fib(3), saved $s0 = 3
+          ├──────────────────────────────┤
+  $sp ->  │ frame C  (fib(1))            │   saved $ra -> fib(2), saved $s0 = 2
+          └──────────────────────────────┘
+```
+
+### Common mistakes with this program
+
+| Mistake | What goes wrong |
+|---------|-----------------|
+| Not saving `$ra` | The first inner `jal fib` overwrites the way back to `main`. Every `jr $ra` then jumps to the line after an inner `jal`, and the program never gets back to `main` (it loops or crashes). |
+| Keeping `n` in `$a0` or a `$t` register instead of `$s0` | The first recursive call overwrites it, so `n - 2` is worked out from the wrong number and the answer is wrong. |
+| Keeping `fib(n - 1)` in `$v0` | The second call puts `fib(n - 2)` in `$v0` and the first answer is lost. |
+| Restoring in a different order / from the wrong offsets | Values come back into the wrong registers (e.g. `$ra` gets the saved `$s0`), and `jr $ra` jumps to a nonsense address. |
+| Having `jr $ra` directly in `base` without popping | `$sp` is left 12 bytes lower and `$ra` is not restored, so returns go to the wrong place and the stack keeps growing. |
+| No base case, or a base case that is never reached | The procedure calls itself forever, pushing a frame each time, until the stack runs out of memory. |
+| Missing `j fib_end` after the `add` | Execution falls into `base` and `move $v0, $s0` replaces the answer with `n`. |
+
 **Points to note:**
 
-- Saving `$ra` is the most important line. Without `sw $ra, 8($sp)`, the
-  first inner `jal fib` replaces the address that leads back to `main`, and
-  the procedure can never return there — the program loops forever.
-- The stack grows **downwards**: `addi $sp, $sp, -12` reserves space and
-  `addi $sp, $sp, 12` releases it. Every push must be matched by a pop of the
-  same size, on every path out of the procedure. That is why both the base
-  case and the recursive case go through the single `fib_end` block instead
-  of having their own `jr $ra`.
-- `n` and `fib(n - 1)` are kept in `$s` registers rather than `$t` registers
-  because they are needed *after* a `jal`. The inner call uses `$t0` itself
-  (`li $t0, 1`), so anything left in a `$t` register would be lost.
-- `fib` restores `$s0` and `$s1` before returning because it is using
-  registers that belong to its caller. This is the same rule `main` relies on
-  in `arithmetic.asm`, seen from the other side.
-- The base case returns `n` itself (`move $v0, $s0`), which covers both
-  `fib(0) = 0` and `fib(1) = 1` with one instruction.
-- `j fib_end` after the `add` is needed so that the result is not overwritten
-  by `move $v0, $s0` in `base`.
 - The terms are numbered from 0, so the series is `0, 1, 1, 2, 3, 5, 8, ...`
   and `n = 10` gives `55`.
-- The recursion repeats work (in the tree above `fib(2)` is computed twice),
-  so the number of calls grows very quickly — `n = 20` is instant, but values
-  above about 30 are noticeably slow. `fib(46) = 1836311903` is the largest
-  term that fits in a 32-bit register (`fib(47)` would overflow at the
-  `add`), but the simulator would take far too long to get anywhere near
+- Only `fib` saves registers. `main` does not need to, because it uses only
+  `$v0` and `$t0` after the call, and it does not need anything in a `$t`
+  register to survive the call.
+- The recursion repeats work (in the `n = 4` tree, `fib(2)` is computed
+  twice), so the number of calls grows very quickly — `n = 20` is instant,
+  but values above about 30 are noticeably slow. `fib(46) = 1836311903` is
+  the largest term that fits in a 32-bit register (`fib(47)` would overflow at
+  the `add`), but the simulator would take far too long to get anywhere near
   that.
+- A negative `n` is also `<= 1`, so it goes straight to `base` and the
+  program prints `n` itself; the Fibonacci series is not defined for negative
+  `n`.

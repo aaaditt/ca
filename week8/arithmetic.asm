@@ -26,7 +26,7 @@ main:           li $v0, 4
                 move $a0, $s0
                 move $a1, $s1
                 jal sum
-                move $t0, $v0          #save the result, the print syscalls reuse v0 and a0
+                move $t0, $v0          #save the result
 
                 li $v0, 4
                 la $a0, sum_msg

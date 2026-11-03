@@ -14,7 +14,7 @@ All three programs were tested before being committed:
 
 | Program | Inputs tried | Output |
 |---------|--------------|--------|
-| `power.asm` | `2^10`, `3^0`, `(-2)^3`, `7^3`, `2^-3`, `4^-2`, `(-2)^-3`, `10^-3`, `0^-2` | `1024`, `1`, `-8`, `343`, `0.125`, `0.0625`, `-0.125`, `0.001`, "undefined" message |
+| `power.asm` | `2^10`, `3^0`, `5^1`, `(-2)^3`, `7^3` | `1024`, `1`, `5`, `-8`, `343` |
 | `sum_natural.asm` | `n = 10, 1, 0, 100` | `55`, `1`, `0`, `5050` |
 | `binary_search.asm` | each of the 10 array values, plus `1`, `50`, `100` | right index for each value; "not found" for the 3 missing ones |
 
@@ -46,33 +46,10 @@ main()
 | 2 | The base case is `n == 1`. | `power(a, 0)` never hits `n == 1`. It goes 0, -1, -2, … forever until the stack runs out. Also, `a^0 = 1` is a valid answer the code can never give. | The base case is `n <= 0 → return 1` (`blez`). `a^1` is then worked out as `a * a^0 = a * 1`, which is correct, so nothing is lost. |
 | 3 | `main` uses `a`, `n` and `pow` without declaring or reading them. | Compile error, and there is no input. | `main` reads `a` and `n` with syscall 5 and prints the result. |
 | 4 | Title says "umber". | Typo only. | — |
-| 5 | Negative powers are not handled. | With `n == 1` as the base case, `n = -3` recurses forever. | `main` checks for `n < 0` and prints `1 / a^(-n)` as a float (see the next section). |
 
-### Correction made later: negative powers used to print `1`
-
-The first version of `power.asm` sent every `n` straight to `power`, and the
-base case `blez` returns 1 for **any** `n <= 0`, not just `n = 0`. So
-`2^-3` printed `1`. The right answer is `2^-3 = 1 / 2^3 = 0.125`.
-
-The problem is that the answer is a fraction, and an integer register cannot
-hold `0.125`. The fix uses the floating point instructions from Week 10, and
-it is done in `main`, so the recursive procedure does not change:
-
-```
-n >= 0  ->  print power(a, n) as an integer        (same as before)
-n <  0  ->  print 1.0 / power(a, -n) as a float    (a^-n = 1 / a^n)
-a = 0 and n < 0  ->  1 / 0, print "undefined"
-```
-
-| Input | Old output | New output |
-|-------|------------|------------|
-| `2^-3` | `1` | `0.125` |
-| `4^-2` | `1` | `0.0625` |
-| `(-2)^-3` | `1` | `-0.125` |
-| `0^-2` | `1` | `0 to a negative power is undefined (1 / 0).` |
-
-The `blez` in `power` is kept as a safety net, but `main` never passes it a
-negative `n` any more.
+`n <= 0` instead of `n == 0` also means a negative `n` stops straight away
+and returns 1 instead of recursing forever. (A real negative power gives a
+fraction, which an integer program cannot hold anyway.)
 
 ## 2. Recursive binary search
 
@@ -184,11 +161,9 @@ only one call each time, so they need less.
 
 ```asm
     .data
-one:            .float 1.0
 msg_a:          .asciiz "Enter the base (a): "
 msg_n:          .asciiz "Enter the power (n): "
 result:         .asciiz "a to the power n is: "
-undefined:      .asciiz "0 to a negative power is undefined (1 / 0)."
 
     .text
 main:           li $v0, 4
@@ -208,8 +183,6 @@ main:           li $v0, 4
                 move $a1, $v0          # $a1 = n
 
                 move $a0, $t0          # $a0 = a
-                bltz $a1, negative     # n < 0 -> answer is a fraction
-
                 jal power              # $v0 = power(a, n)
                 move $t0, $v0          # save the result before printing
 
@@ -221,32 +194,7 @@ main:           li $v0, 4
                 move $a0, $t0
                 syscall                # print a^n
 
-                j exit
-
-negative:       beqz $a0, zero_base    # 0^(-n) = 1 / 0 -> undefined
-
-                sub $a1, $zero, $a1    # $a1 = -n (now positive)
-                jal power              # $v0 = a^(-n), an integer
-
-                mtc1 $v0, $f1          # copy the integer's bits into $f1
-                cvt.s.w $f1, $f1       # convert integer -> float
-                l.s $f2, one           # $f2 = 1.0
-                div.s $f12, $f2, $f1   # $f12 = 1 / a^(-n)
-
-                li $v0, 4
-                la $a0, result
-                syscall                # print "a to the power n is: "
-
-                li $v0, 2
-                syscall                # print the float in $f12
-
-                j exit
-
-zero_base:      li $v0, 4
-                la $a0, undefined
-                syscall                # print the "undefined" message
-
-exit:           li $v0, 10
+                li $v0, 10
                 syscall                # exit
 
 power:          addi $sp, $sp, -8      # push: space for 2 words
@@ -254,7 +202,7 @@ power:          addi $sp, $sp, -8      # push: space for 2 words
                 sw $s0, 0($sp)         # save the caller's $s0
 
                 move $s0, $a0          # $s0 = a
-                blez $a1, base         # n = 0 -> base case (main never sends a negative n)
+                blez $a1, base         # n <= 0 -> base case
 
                 addi $a1, $a1, -1      # argument n - 1 ($a0 still holds a)
                 jal power              # $v0 = a^(n - 1)
@@ -271,14 +219,12 @@ power_end:      lw $s0, 0($sp)         # restore the caller's $s0
 ```
 
 Expected output for `a = 2, n = 10`: `a to the power n is: 1024`.
-For `a = 2, n = -3`: `a to the power n is: 0.125`.
 
 ### The idea
 
 ```
-a^0  = 1
-a^n  = a * a^(n - 1)       for n >= 1
-a^-n = 1 / a^n             for negative powers
+a^0 = 1
+a^n = a * a^(n - 1)        for n >= 1
 ```
 
 So `2^3 = 2 * 2^2 = 2 * (2 * 2^1) = 2 * (2 * (2 * 2^0)) = 2 * 2 * 2 * 1 = 8`.
@@ -309,29 +255,6 @@ So `2^3 = 2 * 2^2 = 2 * (2 * 2^1) = 2 * (2 * (2 * 2^0)) = 2 * 2 * 2 * 1 = 8`.
 6. **Pop and return.** `$s0` and `$ra` are loaded back from the same offsets,
    `$sp` goes back up by 8, and `jr $ra` returns to the caller with the answer
    in `$v0`.
-7. **Negative `n` (in `main`).** `bltz` sends a negative `n` to `negative`:
-   - `beqz $a0, zero_base` catches `a = 0` first, because `1 / 0^3` would
-     divide by zero (MARS would print `Infinity`).
-   - `sub $a1, $zero, $a1` makes `n` positive (`0 - n`), and the **same**
-     `power` procedure works out `a^(-n)` as an integer.
-   - The answer is in an integer register, but `div.s` only works on `$f`
-     registers. `mtc1 $v0, $f1` ("move to coprocessor 1") copies the 32
-     bits across **unchanged**, so `$f1` holds the integer's bit pattern,
-     which is not a float yet. `cvt.s.w $f1, $f1` converts it from integer
-     ("word") format to a float (8 → 8.0). Without the `cvt`, the bits of 8
-     read as a float would be a tiny meaningless number close to 0.
-   - `1.0 / a^(-n)` goes into `$f12` and is printed with syscall 2.
-
-### Trace for `a = 2, n = -3`
-
-| Instruction | Register | Value |
-|-------------|----------|-------|
-| `bltz $a1, negative` | — | `-3 < 0`, jump |
-| `sub $a1, $zero, $a1` | `$a1` | `3` |
-| `jal power` | `$v0` | `2^3 = 8` (integer) |
-| `mtc1 $v0, $f1` | `$f1` | bits of integer 8 |
-| `cvt.s.w $f1, $f1` | `$f1` | `8.0` |
-| `div.s $f12, $f2, $f1` | `$f12` | `1.0 / 8.0 = 0.125` |
 
 ### Trace for `a = 2, n = 3`
 
@@ -354,18 +277,12 @@ At the deepest point there are 4 frames (8 bytes each) on the stack.
 | Base case `n == 1` (as on the board) | `n = 0` recurses forever. |
 | Not saving `$ra` | After the innermost return, every `jr $ra` jumps back to the line after `jal power` inside `power`, never to `main`. |
 | Using `mult` without `mflo` | `mult $s0, $v0` puts the result in `LO`, not in a register; either use `mul` (3 operands) or follow `mult` with `mflo $v0`. |
-| Passing a negative `n` straight to `power` | The `blez` base case returns 1, so `2^-3` prints `1` (the bug fixed above). |
-| `mtc1` without `cvt.s.w` | The integer's bits are read as if they were a float, so `1 / that` is a huge nonsense number. |
-| Using integer `div` for `1 / a^n` | `1 / 8 = 0` in integer division, so every negative power prints `0`. |
 
 **Points to note:**
 
 - `mul` keeps only the lower 32 bits, so large answers overflow silently
   (e.g. `2^31` prints as a negative number, `2^32` prints `0`).
-- A negative base works: `(-2)^3 = -8` and `(-2)^-3 = -0.125` were tested.
-- `0^0` prints `1`, which is the usual convention.
-- Negative powers print as floats, so very small answers are rounded to
-  about 7 digits (`10^-3` prints `0.001`).
+- A negative base works: `(-2)^3 = -8` was tested.
 
 ---
 

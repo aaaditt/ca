@@ -12,7 +12,7 @@ main:           li $v0, 4
 
                 li $v0, 6
                 syscall
-                mov.s $f1, $f0         #f1 = a, the next read overwrites f0
+                mov.s $f1, $f0
 
                 li $v0, 4
                 la $a0, msg_b
@@ -20,7 +20,7 @@ main:           li $v0, 4
 
                 li $v0, 6
                 syscall
-                mov.s $f2, $f0         #f2 = b
+                mov.s $f2, $f0
 
                 li $v0, 4
                 la $a0, msg_c
@@ -28,7 +28,7 @@ main:           li $v0, 4
 
                 li $v0, 6
                 syscall
-                mov.s $f3, $f0         #f3 = c
+                mov.s $f3, $f0
 
                 li $v0, 4
                 la $a0, msg_x
@@ -36,20 +36,20 @@ main:           li $v0, 4
 
                 li $v0, 6
                 syscall
-                mov.s $f4, $f0         #f4 = x
+                mov.s $f4, $f0
 
-                mul.s $f5, $f4, $f4    #f5 = x * x
-                mul.s $f5, $f1, $f5    #f5 = a * x^2
-                mul.s $f6, $f2, $f4    #f6 = b * x
-                add.s $f12, $f5, $f6   #f12 = ax^2 + bx
-                add.s $f12, $f12, $f3  #f12 = ax^2 + bx + c, print float uses f12
+                mul.s $f5, $f4, $f4
+                mul.s $f5, $f1, $f5
+                mul.s $f6, $f2, $f4
+                add.s $f12, $f5, $f6
+                add.s $f12, $f12, $f3
 
                 li $v0, 4
                 la $a0, result
                 syscall
 
                 li $v0, 2
-                syscall                #print the float in f12
+                syscall
 
                 li $v0, 10
                 syscall
